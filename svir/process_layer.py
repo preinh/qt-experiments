@@ -32,12 +32,12 @@ from qgis.core import (QgsMapLayer,
                        QgsVectorLayer,
                        QgsMapLayerRegistry,
                        QgsField)
-from layer_editing_manager import LayerEditingManager
+from utils import LayerEditingManager
 
 from normalization_algs import (NORMALIZATION_ALGS,
                                 normalize)
 
-from utils import DEBUG
+from globals import DEBUG, DOUBLE_FIELD_TYPE_NAME
 
 
 class ProcessLayer():
@@ -58,7 +58,11 @@ class ProcessLayer():
             # TODO: Check that the attributes to be added are not already taken
             layer_pr.addAttributes(attribute_list)
 
-    def normalize_attribute(self, input_attr_name, algorithm_name, variant=""):
+    def normalize_attribute(self,
+                            input_attr_name,
+                            algorithm_name,
+                            variant="",
+                            inverse=False):
         """
         Use one of the available normalization algorithms to normalize an
         attribute of the layer, and add a new attribute with the
@@ -69,8 +73,11 @@ class ProcessLayer():
         input_attr_id = self.find_attribute_id(input_attr_name)
 
         # build the name of the output normalized attribute
-        new_attr_name = algorithm_name
-        self.add_attributes([QgsField(new_attr_name, QVariant.Double)])
+        # WARNING! Shape files support max 10 chars for attribute names
+        new_attr_name = algorithm_name[:10]
+        field = QgsField(new_attr_name, QVariant.Double)
+        field.setTypeName(DOUBLE_FIELD_TYPE_NAME)
+        self.add_attributes([field])
 
         # get the id of the new attribute
         new_attr_id = self.find_attribute_id(new_attr_name)
@@ -85,7 +92,7 @@ class ProcessLayer():
         algorithm = NORMALIZATION_ALGS[algorithm_name]
 
         # normalize the values in the dictionary with the chosen algorithm
-        normalized_dict = normalize(initial_dict, algorithm, variant)
+        normalized_dict = normalize(initial_dict, algorithm, variant, inverse)
 
         with LayerEditingManager(self.layer, 'Write normalized values', DEBUG):
             for feat in self.layer.getFeatures():
@@ -171,3 +178,29 @@ class ProcessLayer():
                 raise RuntimeError('Layer invalid')
 
         return mem_layer
+
+    def is_type_in(self, type_list):
+        """
+        @param type_list: we want to check if the type of the layer is
+        included in this list
+        @return: True if the layer is a VectorLayer and its type is in the list
+        """
+        if self.layer.type() == QgsMapLayer.VectorLayer:
+            v_type = self.layer.wkbType()
+            if v_type == QGis.WKBPoint:
+                type_str = "point"
+            elif v_type == QGis.WKBLineString:
+                type_str = "linestring"
+            elif v_type == QGis.WKBPolygon:
+                type_str = "polygon"
+            elif v_type == QGis.WKBMultiPoint:
+                type_str = "multipoint"
+            elif v_type == QGis.WKBMultiLineString:
+                type_str = "multilinestring"
+            elif v_type == QGis.WKBMultiPolygon:
+                type_str = "multipolygon"
+            else:
+                raise TypeError('Layer type %s can not be accepted' % v_type)
+            return type_str in type_list
+        else:
+            return False

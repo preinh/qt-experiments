@@ -26,50 +26,49 @@
 # along with OpenQuake.  If not, see <http://www.gnu.org/licenses/>.
 """
 from PyQt4.QtCore import pyqtSlot
-from PyQt4.QtGui import QDialog, QDialogButtonBox
+from PyQt4.QtGui import (QDialog,
+                         QDialogButtonBox)
 from qgis.core import QgsMapLayerRegistry
 
-from ui.ui_select_layers_to_join import Ui_SelectLayersToJoinDialog
-from globals import NUMERIC_FIELD_TYPES, STRING_FIELD_TYPE_NAME
+from ui.ui_select_attrs_for_stats import Ui_SelectAttrsForStatsDialog
+
+from globals import NUMERIC_FIELD_TYPES
 
 
-class SelectLayersToJoinDialog(QDialog):
+class SelectAttrsForStatsDialog(QDialog):
     """
     Modal dialog giving to the user the possibility to select
-    a layer containing loss data and one containing SVI data, that will be
-    joined in the SVIR layer
+    a layer containing SVI and aggregated losses, and to pick
+    the attributes containing such data in order to perform some
+    common statistics on them
     """
     def __init__(self):
         QDialog.__init__(self)
         # Set up the user interface from Designer.
-        self.ui = Ui_SelectLayersToJoinDialog()
+        self.ui = Ui_SelectAttrsForStatsDialog()
         self.ui.setupUi(self)
         self.ok_button = self.ui.buttonBox.button(QDialogButtonBox.Ok)
 
     @pyqtSlot(str)
-    def on_loss_layer_cbox_currentIndexChanged(self):
-        self.reload_aggr_loss_attrib_and_merge_attr_cbx()
+    def on_layer_cbx_currentIndexChanged(self):
+        self.reload_attribs_cbx()
 
-    def reload_aggr_loss_attrib_and_merge_attr_cbx(self):
-        self.ui.aggr_loss_attr_cbox.clear()
-        self.ui.merge_attr_cbx.clear()
+    def reload_attribs_cbx(self):
+        # reset combo boxes
+        self.ui.svi_attr_cbx.clear()
+        self.ui.aggr_loss_attr_cbx.clear()
         # populate attribute combo boxes with the list of attributes of the
-        # layer specified in the loss_layer combo box
+        # layer specified in the layer combo box
         layer = QgsMapLayerRegistry.instance().mapLayers().values()[
-            self.ui.loss_layer_cbox.currentIndex()]
+            self.ui.layer_cbx.currentIndex()]
         # populate combo boxes with field names taken by layers
         dp = layer.dataProvider()
         fields = list(dp.fields())
         no_numeric_fields = True
-        no_string_fields = True
         for field in fields:
-            # add to loss attribute cbx numeric fields only
+            # add numeric fields only
             if field.typeName() in NUMERIC_FIELD_TYPES:
-                self.ui.aggr_loss_attr_cbox.addItem(field.name())
+                self.ui.svi_attr_cbx.addItem(field.name())
+                self.ui.aggr_loss_attr_cbx.addItem(field.name())
                 no_numeric_fields = False
-            # add to merge attribute cbx string fields only
-            if field.typeName() == STRING_FIELD_TYPE_NAME:
-                self.ui.merge_attr_cbx.addItem(field.name())
-                no_string_fields = False
         self.ok_button.setDisabled(no_numeric_fields)
-        self.ok_button.setDisabled(no_string_fields)
