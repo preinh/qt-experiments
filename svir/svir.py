@@ -27,6 +27,7 @@
 """
 import os.path
 import uuid
+import copy
 from requests.exceptions import ConnectionError
 
 from PyQt4.QtCore import (QSettings,
@@ -57,6 +58,7 @@ from qgis.gui import QgsMessageBar
 from qgis.analysis import QgsZonalStatistics
 import processing as p
 from processing.saga.SagaUtils import SagaUtils
+from calculate_iri_dialog import CalculateIRIDialog
 
 from process_layer import ProcessLayer
 
@@ -71,8 +73,10 @@ from attribute_selection_dialog import AttributeSelectionDialog
 from normalization_dialog import NormalizationDialog
 from select_attrs_for_stats_dialog import SelectAttrsForStatsDialog
 from select_sv_variables_dialog import SelectSvVariablesDialog
-from platform_settings_dialog import PlatformSettingsDialog
+from settings_dialog import SettingsDialog
 from choose_sv_data_source_dialog import ChooseSvDataSourceDialog
+from weight_data_dialog import WeightDataDialog
+from create_weight_tree_dialog import CreateWeightTreeDialog
 
 from import_sv_data import SvDownloader, SvDownloadError
 
@@ -80,13 +84,17 @@ from utils import (LayerEditingManager,
                    tr,
                    get_credentials,
                    TraceTimeManager,
-                   WaitCursorManager)
+                   WaitCursorManager,
+                   assign_default_weights)
 from globals import (INT_FIELD_TYPE_NAME,
                      DOUBLE_FIELD_TYPE_NAME,
                      NUMERIC_FIELD_TYPES,
                      STRING_FIELD_TYPE_NAME,
                      TEXTUAL_FIELD_TYPES,
-                     DEBUG)
+                     DEBUG,
+                     PROJECT_TEMPLATE,
+                     THEME_TEMPLATE,
+                     INDICATOR_TEMPLATE)
 
 
 class Svir:
@@ -138,34 +146,21 @@ class Svir:
         # Attribute containing aggregated losses, that will be merged with SVI
         self.aggr_loss_attr_to_merge = None
 
-    def add_menu_item(self,
-                      action_name,
-                      icon_path,
-                      label,
-                      corresponding_method,
-                      enable=False):
-        """
-        Add an item to the SVIR plugin menu and a corresponding toolbar icon
-        @param icon_path: Path of the icon associated to the action
-        @param label: Name of the action, visible to the user
-        @param corresponding_method: Method called when the action is triggered
-        """
-        if action_name in self.registered_actions:
-            raise NameError("Action %s already registered" % action_name)
-        action = QAction(QIcon(icon_path), label, self.iface.mainWindow())
-        action.setEnabled(enable)
-        action.triggered.connect(corresponding_method)
-        self.iface.addToolBarIcon(action)
-        self.iface.addPluginToMenu(u"&SVIR", action)
-        self.registered_actions[action_name] = action
+        self.project_definitions = {}
+        self.current_layer = None
+
+        self.iface.currentLayerChanged.connect(self.current_layer_changed)
+        QgsMapLayerRegistry.instance().layersAdded.connect(self.layers_added)
+        QgsMapLayerRegistry.instance().layersRemoved.connect(
+            self.layers_removed)
 
     def initGui(self):
         # Action to activate the modal dialog to set up settings for the
         # connection with the platform
-        self.add_menu_item("platform_settings",
+        self.add_menu_item("svir",
                            ":/plugins/svir/start_plugin_icon.png",
-                           u"&Openquake platform connection settings",
-                           self.platform_settings,
+                           u"&SVIR settings",
+                           self.settings,
                            enable=True)
         # Action to activate the modal dialog to import social vulnerability
         # data from the platform
@@ -210,11 +205,62 @@ class Svir:
             u"id_calculate_svir_indices",
             QgsMapLayer.VectorLayer,
             True)
+        # Action to activate the modal dialog to choose weighting of the
+        # data from the platform
+        self.add_menu_item("create_weight_tree",
+                           ":/plugins/svir/start_plugin_icon.png",
+                           u"&Create/edit weight tree",
+                           self.create_weight_tree,
+                           enable=False)
+        # Action to activate the modal dialog to choose weighting of the
+        # data from the platform
+        self.add_menu_item("weight_data",
+                           ":/plugins/svir/start_plugin_icon.png",
+                           u"&Weight data",
+                           self.weight_data,
+                           enable=False)
+
+        # Action to calculate the SVI
+        self.add_menu_item("calculate_svi",
+                           ":/plugins/svir/start_plugin_icon.png",
+                           u"&Calculate SVI",
+                           self.calculate_svi,
+                           enable=False)
         self.update_actions_status()
-        QgsMapLayerRegistry.instance().layersAdded.connect(
-            self.update_actions_status)
-        QgsMapLayerRegistry.instance().layersRemoved.connect(
-            self.update_actions_status)
+
+    def layers_added(self):
+        self.update_actions_status()
+
+    def layers_removed(self, layer_ids):
+        self.update_actions_status()
+        for layer_id in layer_ids:
+            self.project_definitions.pop(layer_id, None)
+
+    def current_layer_changed(self, layer):
+        self.current_layer = layer
+        if self.current_layer is not None:
+            self.update_actions_status()
+
+    def add_menu_item(self,
+                      action_name,
+                      icon_path,
+                      label,
+                      corresponding_method,
+                      enable=False):
+        """
+        Add an item to the SVIR plugin menu and a corresponding toolbar icon
+        @param icon_path: Path of the icon associated to the action
+        @param label: Name of the action, visible to the user
+        @param corresponding_method: Method called when the action is triggered
+        """
+        if action_name in self.registered_actions:
+            raise NameError("Action %s already registered" % action_name)
+        action = QAction(QIcon(icon_path), label, self.iface.mainWindow())
+        action.setEnabled(enable)
+        action.triggered.connect(corresponding_method)
+        self.iface.addToolBarIcon(action)
+        self.iface.addPluginToMenu(u"&SVIR", action)
+        self.registered_actions[action_name] = action
 
     def update_actions_status(self):
         # Check if actions can be enabled
@@ -230,6 +276,26 @@ class Svir:
         self.registered_actions["calculate_svir_indices"].setDisabled(
             layer_count == 0)
 
+        try:
+            if self.current_layer.type() != QgsMapLayer.VectorLayer:
+                raise AttributeError
+            self.project_definitions[self.current_layer.id()]
+            self.registered_actions["create_weight_tree"].setEnabled(True)
+            self.registered_actions["weight_data"].setEnabled(True)
+            self.registered_actions["calculate_svi"].setEnabled(True)
+
+        except KeyError:
+            # self.project_definitions[self.current_layer.id()] is not defined
+            self.registered_actions["create_weight_tree"].setEnabled(True)
+            self.registered_actions["weight_data"].setEnabled(False)
+            self.registered_actions["calculate_svi"].setEnabled(False)
+        except AttributeError:
+            # self.current_layer.id() does not exist or self.current_layer
+            # is not vector
+            self.registered_actions["create_weight_tree"].setEnabled(False)
+            self.registered_actions["weight_data"].setEnabled(False)
+            self.registered_actions["calculate_svi"].setEnabled(False)
+
     def unload(self):
         # Remove the plugin menu items and toolbar icons
         for action_name in self.registered_actions:
@@ -242,10 +308,13 @@ class Svir:
         self.iface.legendInterface().removeLegendLayerAction(
             self.registered_actions['calculate_svir_indices'])
         self.clear_progress_message_bar()
+
+        #remove connects
+        self.iface.currentLayerChanged.disconnect(self.current_layer_changed)
         QgsMapLayerRegistry.instance().layersAdded.disconnect(
-            self.update_actions_status)
+            self.layers_added)
         QgsMapLayerRegistry.instance().layersRemoved.disconnect(
-            self.update_actions_status)
+            self.layers_removed)
 
     def select_input_layers(self):
         """
@@ -313,6 +382,7 @@ class Svir:
             else:
                 # dlg.ui.layer_rbn.isChecked() so go to select layers
                 self.select_input_layers()
+            self.update_actions_status()
 
     def import_sv_variables(self):
         """
@@ -333,7 +403,7 @@ class Svir:
                 tr("Login Error"),
                 tr(str(e)),
                 level=QgsMessageBar.CRITICAL)
-            self.platform_settings()
+            self.settings()
             return
 
         try:
@@ -343,14 +413,32 @@ class Svir:
                        "Platform...")
                 # Retrieve the indices selected by the user
                 indices_list = []
+                project_definition = copy.deepcopy(PROJECT_TEMPLATE)
+                svi_themes = project_definition[
+                    'children'][1]['children']
+                known_themes = []
                 with WaitCursorManager(msg, self.iface):
                     while dlg.ui.selected_names_lst.count() > 0:
                         item = dlg.ui.selected_names_lst.takeItem(0)
-                        item_text = item.text()
-                        sv_idx = item_text.split(",")[0]
-                        sv_idx = str(sv_idx).replace('"', '')
-                        indices_list.append(sv_idx)
+                        item_text = item.text().replace('"', '')
+
+                        sv = item_text.split(',', 2)
+                        sv_theme = sv[0]
+                        sv_field = sv[1]
+                        sv_name = sv[2]
+                        self._add_new_theme(svi_themes,
+                                            known_themes,
+                                            sv_theme,
+                                            sv_name,
+                                            sv_field)
+
+                        indices_list.append(sv_field)
+
+                    # create string for DB query
                     indices_string = ", ".join(indices_list)
+
+                    assign_default_weights(svi_themes)
+
                     try:
                         fname, msg = sv_downloader.get_data_by_variables_ids(
                             indices_string)
@@ -360,6 +448,7 @@ class Svir:
                             tr(str(e)),
                             level=QgsMessageBar.CRITICAL)
                         return
+
                 display_msg = tr(
                     "Social vulnerability data loaded in a new layer")
                 self.iface.messageBar().pushMessage(tr("Info"),
@@ -379,16 +468,99 @@ class Svir:
                                             'delimitedtext')
                 # obtain a in-memory copy of the layer (editable) and add it to
                 # the registry
-                ProcessLayer(vlayer_csv).duplicate_in_memory(
+                layer = ProcessLayer(vlayer_csv).duplicate_in_memory(
                     'social_vulnerability_zonal_layer',
                     add_to_registry=True)
+                self.iface.setActiveLayer(layer)
+                self.project_definitions[layer.id()] = project_definition
+
         except SvDownloadError as e:
             self.iface.messageBar().pushMessage(tr("Download Error"),
                                                 tr(str(e)),
                                                 level=QgsMessageBar.CRITICAL)
 
-    def platform_settings(self):
-        PlatformSettingsDialog(self.iface).exec_()
+    @staticmethod
+    def _add_new_theme(svi_themes,
+                       known_themes,
+                       indicator_theme,
+                       indicator_name,
+                       indicator_field):
+        """add a new theme to the project_definition"""
+
+        theme = copy.deepcopy(THEME_TEMPLATE)
+        theme['name'] = indicator_theme
+        if theme['name'] not in known_themes:
+            known_themes.append(theme['name'])
+            svi_themes.append(theme)
+        theme_position = known_themes.index(theme['name'])
+        level = float('4.%d' % theme_position)
+        # add a new indicator to a theme
+        new_indicator = copy.deepcopy(INDICATOR_TEMPLATE)
+        new_indicator['name'] = indicator_name
+        new_indicator['field'] = indicator_field
+        new_indicator['level'] = level
+        svi_themes[theme_position]['children'].append(new_indicator)
+
+    def create_weight_tree(self):
+        """
+        Open a modal dialog to create a weight tree from an existing layer
+        """
+        current_layer_id = self.current_layer.id()
+        try:
+            project_definition = self.project_definitions[current_layer_id]
+        except KeyError:
+            project_definition = None
+        dlg = CreateWeightTreeDialog(self.iface,
+                                     self.current_layer,
+                                     project_definition)
+
+        if dlg.exec_():
+            project_definition = copy.deepcopy(PROJECT_TEMPLATE)
+            svi_themes = project_definition['children'][1]['children']
+            known_themes = []
+            for indicator in dlg.indicators():
+                self._add_new_theme(svi_themes,
+                                    known_themes,
+                                    indicator['theme'],
+                                    indicator['name'],
+                                    indicator['field'])
+
+            assign_default_weights(svi_themes)
+            self.project_definitions[current_layer_id] = project_definition
+            self.update_actions_status()
+
+    def weight_data(self):
+        """
+        Open a modal dialog to select weights in a d3.js visualization
+        """
+        current_layer_id = self.current_layer.id()
+        project_definition = self.project_definitions[current_layer_id]
+        dlg = WeightDataDialog(self.iface, project_definition)
+        dlg.json_cleaned.connect(self.redraw_ir_layer)
+        if dlg.exec_():
+            self.project_definitions[current_layer_id] = dlg.project_definition
+            self.update_actions_status()
+        dlg.json_cleaned.disconnect(self.redraw_ir_layer)
+        # if the dlg was not accepted, self.project_definition is still the
+        # one we had before opening the dlg and we use it do reset the changes
+        self.redraw_ir_layer(project_definition)
+
+    def calculate_svi(self):
+        """
+        add an SVI attribute to the current layer
+        """
+        current_layer_id = self.current_layer.id()
+        project_definition = self.project_definitions[current_layer_id]
+        dlg = CalculateIRIDialog(
+            self.iface, self.current_layer, project_definition)
+        if dlg.exec_():
+            dlg.calculate()
+
+    def redraw_ir_layer(self, data):
+        print "REDRAW USING %s" % data
+
+    def settings(self):
+        SettingsDialog(self.iface).exec_()
 
     def merge_svi_with_aggr_losses(self):
         """
