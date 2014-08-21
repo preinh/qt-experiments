@@ -9,12 +9,12 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>363</width>
-    <height>348</height>
+    <width>389</width>
+    <height>352</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Dialog</string>
+   <string>Calculate Indices</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
@@ -23,35 +23,9 @@
       <string>SVI</string>
      </property>
      <layout class="QFormLayout" name="formLayout">
-      <item row="0" column="1">
-       <widget class="QComboBox" name="themes_combination_type">
-        <property name="enabled">
-         <bool>true</bool>
-        </property>
-        <item>
-         <property name="text">
-          <string>Average</string>
-         </property>
-        </item>
-        <item>
-         <property name="text">
-          <string>Sum</string>
-         </property>
-        </item>
-        <item>
-         <property name="text">
-          <string>Multiplication</string>
-         </property>
-        </item>
-       </widget>
-      </item>
-      <item row="0" column="0">
-       <widget class="QLabel" name="label_3">
-        <property name="text">
-         <string>Theme combination type</string>
-        </property>
-       </widget>
-      </item>
+      <property name="fieldGrowthPolicy">
+       <enum>QFormLayout::AllNonFixedFieldsGrow</enum>
+      </property>
       <item row="1" column="0">
        <widget class="QLabel" name="label_2">
         <property name="text">
@@ -64,21 +38,20 @@
         <property name="enabled">
          <bool>true</bool>
         </property>
-        <item>
-         <property name="text">
-          <string>Average</string>
-         </property>
-        </item>
-        <item>
-         <property name="text">
-          <string>Sum</string>
-         </property>
-        </item>
-        <item>
-         <property name="text">
-          <string>Multiplication</string>
-         </property>
-        </item>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QComboBox" name="themes_combination_type">
+        <property name="enabled">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_3">
+        <property name="text">
+         <string>Theme combination type</string>
+        </property>
        </widget>
       </item>
      </layout>
@@ -96,71 +69,48 @@
       <bool>false</bool>
      </property>
      <layout class="QFormLayout" name="formLayout_2">
-      <item row="4" column="0">
+      <property name="fieldGrowthPolicy">
+       <enum>QFormLayout::AllNonFixedFieldsGrow</enum>
+      </property>
+      <item row="5" column="1">
+       <widget class="QComboBox" name="aal_field"/>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="label_5">
+        <property name="text">
+         <string>Risk field</string>
+        </property>
+       </widget>
+      </item>
+      <item row="8" column="1">
+       <widget class="QComboBox" name="iri_combination_type"/>
+      </item>
+      <item row="8" column="0">
        <widget class="QLabel" name="label">
         <property name="text">
          <string>IRI combination type</string>
         </property>
        </widget>
       </item>
-      <item row="1" column="0">
+      <item row="4" column="1">
+       <widget class="QComboBox" name="svi_field_cbx"/>
+      </item>
+      <item row="4" column="0">
        <widget class="QLabel" name="label_4">
         <property name="text">
-         <string>AAL layer</string>
+         <string>SVI field</string>
         </property>
        </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="QComboBox" name="aal_layer"/>
       </item>
       <item row="3" column="0">
-       <widget class="QLabel" name="label_5">
+       <widget class="QCheckBox" name="recalculate_svi_check">
         <property name="text">
-         <string>AAL field</string>
+         <string>Recalculate SVI</string>
+        </property>
+        <property name="checked">
+         <bool>false</bool>
         </property>
        </widget>
-      </item>
-      <item row="3" column="1">
-       <widget class="QComboBox" name="aal_field"/>
-      </item>
-      <item row="4" column="1">
-       <widget class="QComboBox" name="iri_combination_type">
-        <item>
-         <property name="text">
-          <string>Average</string>
-         </property>
-        </item>
-        <item>
-         <property name="text">
-          <string>Sum</string>
-         </property>
-        </item>
-        <item>
-         <property name="text">
-          <string>Multiplication</string>
-         </property>
-        </item>
-       </widget>
-      </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="label_6">
-        <property name="text">
-         <string>AAL id attribute</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="1">
-       <widget class="QComboBox" name="aal_id_field"/>
-      </item>
-      <item row="0" column="0">
-       <widget class="QLabel" name="label_7">
-        <property name="text">
-         <string>SVI id attribute</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="QComboBox" name="svi_id_field"/>
       </item>
      </layout>
     </widget>

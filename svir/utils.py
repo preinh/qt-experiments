@@ -28,7 +28,7 @@
 import collections
 from time import time
 from PyQt4.QtCore import QSettings, Qt
-from PyQt4.QtGui import QApplication, QProgressBar
+from PyQt4.QtGui import QApplication, QProgressBar, QToolButton
 from qgis.core import QgsMapLayerRegistry
 from settings_dialog import SettingsDialog
 from qgis.gui import QgsMessageBar
@@ -163,15 +163,50 @@ def toggle_select_features(layer, use_new, new_feature_ids, old_feature_ids):
         layer.setSelectedFeatures(old_feature_ids)
 
 
+def toggle_select_features_widget(title, text, button_text, layer,
+                                  new_feature_ids, old_feature_ids):
+    """
+    Create a widget for QgsMessageBar to switch between two sets.
+
+    :param title: The title
+    :type title: str
+    :param text: The text message
+    :type text: str
+    :param button_text: The text on the toggle button
+    :type button_text: str
+    :param layer: The QgsVectorLayer where the selection is applied
+    :type layer: QgsVectorLayer
+    :param new_feature_ids: The list to select if use_new is true
+    :type new_feature_ids: QgsFeatureIds
+    :param old_feature_ids: The list to select if use_new is false
+    :type old_feature_ids: QgsFeatureIds
+    """
+    widget = QgsMessageBar.createMessage(title, text)
+    button = QToolButton(widget)
+    button.setCheckable(True)
+    button.setText(button_text)
+    button.toggled.connect(
+        lambda on,
+        layer=layer,
+        new_feature_ids=new_feature_ids,
+        old_feature_ids=old_feature_ids:
+        toggle_select_features(layer,
+                               on,
+                               new_feature_ids,
+                               old_feature_ids))
+    widget.layout().addWidget(button)
+    return widget
+
+
 class Register(collections.OrderedDict):
     """
     Useful to keep (in a single point) a register of available variants of
-    something, e.g. a set of different normalization/standardization algorithms
+    something, e.g. a set of different transformation algorithms
     """
     def add(self, tag):
         """
         Add a new variant to the OrderedDict
-        For instance, if we add a class implementing a specific normalization
+        For instance, if we add a class implementing a specific transformation
         algorithm, the register will keep track of a new item having as key the
         name of the algorithm and as value the class implementing the algorithm
         """

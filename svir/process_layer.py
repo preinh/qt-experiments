@@ -35,8 +35,7 @@ from qgis.core import (QgsMapLayer,
                        QgsField)
 from utils import LayerEditingManager
 
-from normalization_algs import (NORMALIZATION_ALGS,
-                                normalize)
+from transformation_algs import (TRANSFORMATION_ALGS, transform)
 
 from globals import DEBUG, DOUBLE_FIELD_TYPE_NAME
 
@@ -46,7 +45,7 @@ class ProcessLayer():
     def __init__(self, layer):
         self.layer = layer
 
-    def add_attributes(self, attribute_list):
+    def add_attributes(self, attribute_list, simulate=False):
         """
         Add attributes to the layer
 
@@ -63,7 +62,7 @@ class ProcessLayer():
             proposed_attribute_dict = {}
             proposed_attribute_list = []
             for input_attribute in attribute_list:
-                input_attribute_name = input_attribute.name()
+                input_attribute_name = input_attribute.name()[:10]
                 proposed_attribute_name = input_attribute_name
                 i = 1
                 while True:
@@ -72,8 +71,12 @@ class ProcessLayer():
                     if proposed_attribute_name in current_attribute_names:
                         # If the attribute is already assigned, change the
                         # proposed_attribute_name
+                        i_num_digits = len(str(i))
+                        # 10 = shapefile limit
+                        # 1 = underscore
+                        max_name_len = 10 - i_num_digits - 1
                         proposed_attribute_name = '%s_%d' % (
-                            input_attribute_name, i)
+                            input_attribute_name[:max_name_len], i)
                         i += 1
                     else:
                         # If the attribute name is not already assigned,
@@ -83,35 +86,60 @@ class ProcessLayer():
                         input_attribute.setName(proposed_attribute_name)
                         proposed_attribute_list.append(input_attribute)
                         break
-            added_ok = layer_pr.addAttributes(proposed_attribute_list)
-            if not added_ok:
-                raise AttributeError(
-                    'Unable to add attributes %s' % proposed_attribute_list)
+            if not simulate:
+                added_ok = layer_pr.addAttributes(proposed_attribute_list)
+                if not added_ok:
+                    raise AttributeError(
+                        'Unable to add attributes %s' %
+                        proposed_attribute_list)
         return proposed_attribute_dict
 
-    def normalize_attribute(self,
-                            input_attr_name,
-                            algorithm_name,
-                            variant="",
-                            inverse=False):
+    def delete_attributes(self, attribute_list):
         """
-        Use one of the available normalization algorithms to normalize an
+        Delete attributes from the layer
+
+        :param attribute_list: list of id to remove from the layer
+        :type attribute_list: list of int
+
+        :return: true in case of success and false in case of failure
+        """
+        with LayerEditingManager(self.layer, 'Remove attributes', DEBUG):
+            # remove attributes
+            layer_pr = self.layer.dataProvider()
+            print "REMOVING %s" % attribute_list
+            #TODO fix this
+            print "TODO fix ProcessLayer.delete_attributes()"
+            print "this attributes should be deleted: %s" % attribute_list
+            #return layer_pr.deleteAttributes(attribute_list)
+
+    def transform_attribute(
+            self, input_attr_name, algorithm_name, variant="",
+            inverse=False, new_attr_name=None, simulate=False):
+        """
+        Use one of the available transformation algorithms to transform an
         attribute of the layer, and add a new attribute with the
-        normalized data, named as something like 'attr_name__algorithm', e.g.,
-        'TOTLOSS__MIN_MAX'
+        transformed data
         """
         # get the id of the attribute named input_attr_name
         input_attr_id = self.find_attribute_id(input_attr_name)
 
-        # build the name of the output normalized attribute
+        # build the name of the output transformed attribute
         # WARNING! Shape files support max 10 chars for attribute names
-        new_attr_name = algorithm_name[:10]
+        if not new_attr_name:
+            if variant:
+                new_attr_name = algorithm_name[:5] + '_' + variant[:4]
+            else:
+                new_attr_name = algorithm_name[:10]
+        else:
+            new_attr_name = new_attr_name[:10]
+        new_attr_name = new_attr_name.replace(' ', '_')
         field = QgsField(new_attr_name, QVariant.Double)
         field.setTypeName(DOUBLE_FIELD_TYPE_NAME)
-        self.add_attributes([field])
-
-        # get the id of the new attribute
-        new_attr_id = self.find_attribute_id(new_attr_name)
+        if simulate:
+            attr_names_dict = self.add_attributes([field], simulate=simulate)
+            # get the name actually assigned to the new attribute
+            actual_new_attr_name = attr_names_dict[new_attr_name]
+            return actual_new_attr_name
 
         # a dict will contain all the values for the chosen input attribute,
         # keeping as key, for each value, the id of the corresponding feature
@@ -119,25 +147,33 @@ class ProcessLayer():
         for feat in self.layer.getFeatures():
             initial_dict[feat.id()] = feat[input_attr_id]
 
-        # get the normalization algorithm from the register
-        algorithm = NORMALIZATION_ALGS[algorithm_name]
+        # get the transformation algorithm from the register
+        algorithm = TRANSFORMATION_ALGS[algorithm_name]
 
-        # normalize the values in the dictionary with the chosen algorithm
+        # transform the values in the dictionary with the chosen algorithm
         try:
-            normalized_dict = normalize(
+            transformed_dict = transform(
                 initial_dict, algorithm, variant, inverse)
         except ValueError:
             raise
         except NotImplementedError:
             raise
 
-        with LayerEditingManager(self.layer, 'Write normalized values', DEBUG):
+        attr_names_dict = self.add_attributes([field], simulate=simulate)
+        # get the name actually assigned to the new attribute
+        actual_new_attr_name = attr_names_dict[new_attr_name]
+        # get the id of the new attribute
+        new_attr_id = self.find_attribute_id(actual_new_attr_name)
+
+        with LayerEditingManager(
+                self.layer, 'Write transformed values', DEBUG):
             for feat in self.layer.getFeatures():
                 feat_id = feat.id()
-                value = normalized_dict[feat_id]
+                value = transformed_dict[feat_id]
                 if type(value) not in (QPyNullVariant, NoneType):
                     value = float(value)
                 self.layer.changeAttributeValue(feat_id, new_attr_id, value)
+        return actual_new_attr_name
 
     def find_attribute_id(self, attribute_name):
         """
